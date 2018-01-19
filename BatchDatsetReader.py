@@ -3,8 +3,6 @@ Code ideas from https://github.com/Newmu/dcgan and tensorflow mnist dataset read
 """
 import numpy as np
 import scipy.misc as misc
-import cv2
-import PIL
 
 
 class BatchDatset:
@@ -34,59 +32,12 @@ class BatchDatset:
 
     def _read_images(self):
         self.__channels = True
-        self.pre_images = np.array([self._transform(filename['image']) for filename in self.files])
+        self.images = np.array([self._transform(filename['image']) for filename in self.files])
         self.__channels = False
-        self.pre_annotations = np.array(
+        self.annotations = np.array(
             [np.expand_dims(self._transform(filename['annotation']), axis=3) for filename in self.files])
-        self.format_annotations()
-        print (self.pre_images.shape)
-        print (self.pre_annotations.shape)
-
-    def format_annotations(self):
-
-        self.annotations = np.zeros((self.pre_annotations.shape[0],4,151,1))
-        for i in range(self.pre_annotations.shape[0]):
-            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:][:56,:56,:])
-            
-
-            top_left = np.copy(cropped_annotation[:28,:28,:])
-            top_right = np.copy(cropped_annotation[28:,:28,:])
-            bottom_right = np.copy(cropped_annotation[28:,28:,:])
-            bottom_left = np.copy(cropped_annotation[:28,28:,:])
-
-            unique, counts = np.unique(top_left, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,0,unique[j],0] = self.annotations[i,0,unique[j],0] + counts[j]
-                self.annotations[i,0,unique[j],0] = 1
-
-            unique, counts = np.unique(top_right, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,1,unique[j],0] = self.annotations[i,1,unique[j],0] + counts[j]
-                self.annotations[i,1,unique[j],0] = 1
-
-            unique, counts = np.unique(bottom_right, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,2,unique[j],0] = self.annotations[i,3,unique[j],0] + counts[j]
-                self.annotations[i,2,unique[j],0] = 1
-
-            unique, counts = np.unique(bottom_left, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,3,unique[j],0] = self.annotations[i,1,unique[j],0] + counts[j]
-                self.annotations[i,3,unique[j],0] = 1
-
-        
-        self.images = self.pre_images[:,:56,:56,:]
-        print ("####################")
-        print (self.annotations.shape)
         print (self.images.shape)
-
-
-
-
+        print (self.annotations.shape)
 
     def _transform(self, filename):
         image = misc.imread(filename)

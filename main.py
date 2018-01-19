@@ -19,7 +19,7 @@ tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
 
 MAX_ITERATION = int(1e5 + 1)
 NUM_OF_CLASSESS = 151
-IMAGE_SIZE = 112
+IMAGE_SIZE = 56
 PROCESSED_IMAGE_SIZE = 56
 
 tf.reset_default_graph()
@@ -49,6 +49,7 @@ conv2_params = {
     "padding": "valid",
     "activation": tf.nn.relu
 }
+
 
 conv1 = tf.layers.conv2d(X, name="conv1", **conv1_params)
 conv2 = tf.layers.conv2d(conv1, name="conv2", **conv2_params)
@@ -148,12 +149,34 @@ caps2_output_round_2 = squash(weighted_sum_round_2,
 caps2_output = caps2_output_round_2
 
 
+decoder_input = tf.reshape(caps2_output,
+                           [-1, caps2_n_caps * caps2_n_dims],
+                           name="decoder_input")
+
+
+n_hidden1 = 512
+n_hidden2 = 1024
+n_output = 56 * 56
+
+
+with tf.name_scope("decoder"):
+    hidden1 = tf.layers.dense(decoder_input, n_hidden1,
+                              activation=tf.nn.relu,
+                              name="hidden1")
+    hidden2 = tf.layers.dense(hidden1, n_hidden2,
+                              activation=tf.nn.relu,
+                              name="hidden2")
+    decoder_output = tf.layers.dense(hidden2, n_output,
+                                     activation=tf.nn.sigmoid,
+                                     name="decoder_output")
+
+
+
 
 
 print(caps2_output)
-annotation = tf.placeholder(tf.float32, shape=[None, 4, 151, 1], name="annotation")
-shaped_annotations = tf.nn.softmax(tf.squeeze(annotation, squeeze_dims=[3]),dim = 2)
-shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4]),dim = 2)
+annotation = tf.placeholder(tf.float32, shape=[None, 56, 56, 1], name="annotation")
+
 
 # loss = tf.reduce_mean((tf.nn.softmax_cross_entropy_with_logits(logits=shaped_caps2_output,
 #                                                                       labels=shaped_annotations,
@@ -161,7 +184,15 @@ shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4])
 
 #loss = tf.losses.cosine_distance(labels = shaped_annotations, predictions = shaped_caps2_output, dim =2)
 #loss = tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.squeeze(annotation, squeeze_dims=[3]), logits = tf.squeeze(caps2_output, squeeze_dims=[1,4]))
-loss = tf.add(tf.multiply(tf.squeeze(annotation, squeeze_dims=[3]),tf.log(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])))), tf.multiply(tf.subtract(1.0,tf.squeeze(annotation, squeeze_dims=[3])),tf.log(tf.subtract(1.0,tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4]))))))
+#loss = tf.add(tf.multiply(tf.squeeze(annotation, squeeze_dims=[3]),tf.log(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])))), tf.multiply(tf.subtract(1.0,tf.squeeze(annotation, squeeze_dims=[3])),tf.log(tf.subtract(1.0,tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4]))))))
+annot_flat = tf.reshape(annotation, [-1, n_output], name="X_flat")
+squared_difference = tf.square(annot_flat - decoder_output,
+                               name="squared_difference")
+
+loss = tf.reduce_mean(squared_difference,
+                                    name="reconstruction_loss")
+
+
 
 optimizer = tf.train.AdamOptimizer()
 training_op = optimizer.minimize(loss, name="training_op")
@@ -196,8 +227,10 @@ for itr in xrange(MAX_ITERATION):
 	X_batch, y_batch = train_dataset_reader.next_batch(FLAGS.batch_size)
 	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
 	
-	# if (itr % 10) == 0:
+	if (itr % 10) == 0:
 	# 	print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
+		print("Training Loss:")
+		print(loss_train)
 
 	if (itr % 500) == 0:
 		X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
