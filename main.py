@@ -53,9 +53,32 @@ conv2_params = {
 conv1 = tf.layers.conv2d(X, name="conv1", **conv1_params)
 conv2 = tf.layers.conv2d(conv1, name="conv2", **conv2_params)
 
-print(conv2)
 
-caps1_raw = tf.reshape(conv2, [-1, caps1_n_caps, caps1_n_dims],
+
+fc_input = tf.reshape(conv2,
+                           [-1, caps1_n_caps * caps1_n_dims],
+                           name="fc_input")
+
+
+n_hidden1 = 512
+n_output = caps1_n_caps * caps1_n_dims
+
+hidden1 = tf.layers.dense(fc_input, n_hidden1,
+                              activation=tf.nn.relu,
+                              name="hidden1")
+
+
+fc_output = tf.layers.dense(hidden1, caps1_n_caps * caps1_n_dims,
+                                     activation=tf.nn.relu,
+                                     name="decoder_output")
+
+caps1_input = tf.reshape(fc_output,
+                           [-1, 20, 20,256],
+                           name="fc_input")
+
+print(caps1_input)
+
+caps1_raw = tf.reshape(caps1_input, [-1, caps1_n_caps, caps1_n_dims],
                        name="caps1_raw")
 
 
@@ -161,7 +184,13 @@ shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4])
 
 #loss = tf.losses.cosine_distance(labels = shaped_annotations, predictions = shaped_caps2_output, dim =2)
 #loss = tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.squeeze(annotation, squeeze_dims=[3]), logits = tf.squeeze(caps2_output, squeeze_dims=[1,4]))
-loss = tf.add(tf.multiply(tf.squeeze(annotation, squeeze_dims=[3]),tf.log(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])))), tf.multiply(tf.subtract(1.0,tf.squeeze(annotation, squeeze_dims=[3])),tf.log(tf.subtract(1.0,tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4]))))))
+#loss = tf.add(tf.multiply(tf.squeeze(annotation, squeeze_dims=[3]),tf.log(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])))), tf.multiply(tf.subtract(1.0,tf.squeeze(annotation, squeeze_dims=[3])),tf.log(tf.subtract(1.0,tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4]))))))
+
+squared_difference = tf.square(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])) - tf.sigmoid(tf.squeeze(annotation, squeeze_dims=[3])),
+                               name="squared_difference")
+loss = tf.reduce_mean(squared_difference,
+                                    name="reconstruction_loss")
+
 
 optimizer = tf.train.AdamOptimizer()
 training_op = optimizer.minimize(loss, name="training_op")
@@ -196,9 +225,10 @@ for itr in xrange(MAX_ITERATION):
 	X_batch, y_batch = train_dataset_reader.next_batch(FLAGS.batch_size)
 	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
 	
-	# if (itr % 10) == 0:
-	# 	print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
-
+	if (itr % 10) == 0:
+		#print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
+		print("Training loss:")
+		print(loss_train)
 	if (itr % 500) == 0:
 		X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
 		loss_val = sess.run([loss], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
