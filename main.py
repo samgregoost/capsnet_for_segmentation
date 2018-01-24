@@ -17,7 +17,7 @@ tf.flags.DEFINE_string("model_dir", "Model_zoo/", "Path to vgg model mat")
 tf.flags.DEFINE_bool('debug', "False", "Debug mode: True/ False")
 tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
 
-MAX_ITERATION = int(1e5 + 1)
+MAX_ITERATION = int(1e7 + 1)
 NUM_OF_CLASSESS = 151
 IMAGE_SIZE = 112
 PROCESSED_IMAGE_SIZE = 56
@@ -107,6 +107,11 @@ W_init = tf.random_normal(
     stddev=init_sigma, dtype=tf.float32, name="W_init")
 W = tf.Variable(W_init, name="W")
 
+W_sum_init = tf.random_normal(
+    shape=(1, caps1_n_caps, caps2_n_caps, 1, 1),
+    stddev=init_sigma, dtype=tf.float32, name="W_init_sum")
+w_sums = tf.Variable(W_sum_init, name="W_sum")
+
 
 batch_size = tf.shape(X)[0]
 W_tiled = tf.tile(W, [batch_size, 1, 1, 1, 1], name="W_tiled")
@@ -135,13 +140,39 @@ raw_weights = tf.zeros([batch_size, caps1_n_caps, caps2_n_caps, 1, 1],
 
 routing_weights = tf.nn.softmax(raw_weights, dim=2, name="routing_weights")
 
-weighted_predictions = tf.multiply(routing_weights, caps2_predicted,
+weighted_predictions_init = tf.multiply(routing_weights, caps2_predicted,
                                    name="weighted_predictions")
+weighted_predictions = tf.multiply(w_sums, weighted_predictions_init,
+                                   name="weighted_predictions_sum")
 weighted_sum = tf.reduce_sum(weighted_predictions, axis=1, keep_dims=True,
                              name="weighted_sum")
 
-caps2_output_round_1 = squash(weighted_sum, axis=-2,
+caps2_output_round_1_init = squash(weighted_sum, axis=-2,
                               name="caps2_output_round_1")
+
+
+
+
+################################################
+
+fc_input_2 = tf.reshape(caps2_output_round_1_init,
+                           [-1, caps2_n_caps * caps2_n_dims],
+                           name="fc_input2")
+
+
+n_hidden2 = caps2_n_caps * caps2_n_dims
+
+
+fc_output2 = tf.layers.dense(fc_input_2, n_hidden2,
+                              activation=tf.nn.relu,
+                              name="hidden2")
+
+
+caps2_output_round_1 = tf.add(caps2_output_round_1_init, tf.reshape(fc_output2,
+                           [-1, 1,4, 151,1],
+                           name="fc_input2"))
+
+##################################################################
 
 caps2_output_round_1_tiled = tf.tile(
     caps2_output_round_1, [1, caps1_n_caps, 1, 1, 1],
@@ -164,20 +195,64 @@ weighted_predictions_round_2 = tf.multiply(routing_weights_round_2,
 weighted_sum_round_2 = tf.reduce_sum(weighted_predictions_round_2,
                                      axis=1, keep_dims=True,
                                      name="weighted_sum_round_2")
-caps2_output_round_2 = squash(weighted_sum_round_2,
+caps2_output_round_2_init = squash(weighted_sum_round_2,
                               axis=-2,
                               name="caps2_output_round_2")
+
+######################################################
+
+fc_input_3 = tf.reshape(caps2_output_round_2_init,
+                           [-1, caps2_n_caps * caps2_n_dims],
+                           name="fc_input3")
+
+
+n_hidden3 = caps2_n_caps * caps2_n_dims
+
+
+fc_output3 = tf.layers.dense(fc_input_3, n_hidden3,
+                              activation=tf.nn.relu,
+                              name="hidden3")
+
+
+caps2_output_round_2 = tf.add(caps2_output_round_2_init, tf.reshape(fc_output3,
+                           [-1, 1,4, 151,1],
+                           name="fc_input3"))
+
+
+
+
+###################################################
+
 
 caps2_output = caps2_output_round_2
 
 
+y_pred = tf.cast(tf.squeeze(tf.to_int32(caps2_output > 0.5),axis=[1,4]),tf.float32)
+
+print(y_pred)
 
 
-print(caps2_output)
+m_plus = 0.9
+m_minus = 0.1
+lambda_ = 0.5
+
+
+
 annotation = tf.placeholder(tf.float32, shape=[None, 4, 151, 1], name="annotation")
-shaped_annotations = tf.nn.softmax(tf.squeeze(annotation, squeeze_dims=[3]),dim = 2)
-shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4]),dim = 2)
+shaped_annotations = tf.squeeze(annotation, squeeze_dims=[3])
+#shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4]),dim = 2)
 
+present_error_raw = tf.square(tf.maximum(0., m_plus - caps2_output), name="present_error_raw")
+present_error = tf.reshape(present_error_raw, shape=(-1, 4, 151), name="present_error")
+
+
+absent_error_raw = tf.square(tf.maximum(0., caps2_output - m_minus),name="absent_error_raw")
+absent_error = tf.reshape(absent_error_raw, shape=(-1,4, 151), name="absent_error")
+
+
+L = tf.add(tf.multiply(shaped_annotations,present_error), lambda_ * tf.multiply((1.0 - shaped_annotations), absent_error),name="L")
+
+loss = tf.reduce_mean(tf.reduce_sum(L, axis=1), name="margin_loss")
 # loss = tf.reduce_mean((tf.nn.softmax_cross_entropy_with_logits(logits=shaped_caps2_output,
 #                                                                       labels=shaped_annotations,
 #                                                                       name="entropy")))
@@ -186,11 +261,13 @@ shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4])
 #loss = tf.nn.sigmoid_cross_entropy_with_logits(labels = tf.squeeze(annotation, squeeze_dims=[3]), logits = tf.squeeze(caps2_output, squeeze_dims=[1,4]))
 #loss = tf.add(tf.multiply(tf.squeeze(annotation, squeeze_dims=[3]),tf.log(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])))), tf.multiply(tf.subtract(1.0,tf.squeeze(annotation, squeeze_dims=[3])),tf.log(tf.subtract(1.0,tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4]))))))
 
-squared_difference = tf.square(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])) - tf.sigmoid(tf.squeeze(annotation, squeeze_dims=[3])),
-                               name="squared_difference")
-loss = tf.reduce_mean(squared_difference,
-                                    name="reconstruction_loss")
-
+# squared_difference = tf.square(tf.sigmoid(tf.squeeze(caps2_output, squeeze_dims=[1,4])) - tf.sigmoid(tf.squeeze(annotation, squeeze_dims=[3])),
+#                                name="squared_difference")
+# loss = tf.reduce_mean(squared_difference,
+#                                     name="reconstruction_loss")
+best_loss_val = np.infty
+correct = tf.equal(shaped_annotations, y_pred, name="correct")
+accuracy = tf.reduce_mean(tf.cast(correct, tf.float32), name="accuracy")
 
 optimizer = tf.train.AdamOptimizer()
 training_op = optimizer.minimize(loss, name="training_op")
@@ -213,6 +290,8 @@ batch_size = 50
 restore_checkpoint = True
 
 
+recall = tf.metrics.recall(labels = shaped_annotations, predictions = y_pred)
+precision = tf.metrics.precision(labels = shaped_annotations, predictions = y_pred)
 
 
 checkpoint_path = "./my_capsule_network"
@@ -220,19 +299,76 @@ checkpoint_path = "./my_capsule_network"
 #151 classes
 
 sess.run(tf.global_variables_initializer())
+sess.run(tf.local_variables_initializer())
 
+#saver.restore(sess, checkpoint_path)
+epoch = 0
 for itr in xrange(MAX_ITERATION):
+	# loss_vals = []
+	# acc_vals = []
+	# recall_vals = []
+	# precision_vals = []
+	# for val_itr in range(1,1000):
+	# 	X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
+	# 	loss_val, acc_val, recall_val, precision_val = sess.run([loss,accuracy, recall, precision], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
+	# 	loss_vals.append(loss_val)
+	# 	acc_vals.append(acc_val)
+	# 	recall_vals.append(recall_val)
+	# 	precision_vals.append(precision_val)
+	# 	print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
+	# 			val_itr, 1000,
+	# 			val_itr * 100 / 1000),
+	# 			end=" " * 10)
+		
+	# loss_val = np.mean(loss_vals)
+	# acc_val = np.mean(acc_vals)
+	# recall_val = np.mean(recall_vals)
+	# precision_val = np.mean(precision_vals)
+	
+	# print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f}".format(
+	# 		epoch, acc_val * 100, loss_val,
+	# 		" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val))
+
+
+
+
+
 	X_batch, y_batch = train_dataset_reader.next_batch(FLAGS.batch_size)
 	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
 	
 	if (itr % 10) == 0:
-		#print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
-		print("Training loss:")
-		print(loss_train)
-	if (itr % 500) == 0:
-		X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
-		loss_val = sess.run([loss], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
-		print("Validation Loss:")
-		print("none")
-		print(loss_val)
+	# 	print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
+		print("\rIteration: {}/{} ({:.1f}%)  Loss: {:.5f}".format(
+                      itr, 10000,
+                      itr * 100 / 10000,
+                      loss_train),
+                  end="")
+	if (itr % 10000) == 0:
+		loss_vals = []
+		acc_vals = []
+		recall_vals = []
+		precision_vals = []
+		for val_itr in range(1,1000):
+			X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
+			loss_val, acc_val, recall_val, precision_val = sess.run([loss,accuracy, recall, precision], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
+			loss_vals.append(loss_val)
+			acc_vals.append(acc_val)
+			recall_vals.append(recall_val)
+			precision_vals.append(precision_val)
+			print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
+					val_itr, 1000,
+					val_itr * 100 / 1000),
+					end=" " * 10)
+			
+		loss_val = np.mean(loss_vals)
+		acc_val = np.mean(acc_vals)
+		recall_val = np.mean(recall_vals)
+		precision_val = np.mean(precision_vals)
+		epoch = epoch + 1
+		print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f}".format(
+				epoch, acc_val * 100, loss_val,
+				" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val))
+		if loss_val < best_loss_val:
+			save_path = saver.save(sess, checkpoint_path)
+			best_loss_val = loss_val
 		#save_path = saver.save(sess, checkpoint_path)
