@@ -107,6 +107,11 @@ W_init = tf.random_normal(
     stddev=init_sigma, dtype=tf.float32, name="W_init")
 W = tf.Variable(W_init, name="W")
 
+W_r_init = tf.random_normal(
+    shape=(1, caps1_n_caps, caps2_n_caps, caps1_n_dims, caps2_n_dims),
+    stddev=init_sigma, dtype=tf.float32, name="W_initr")
+W_r = tf.Variable(W_r_init, name="Wr")
+
 W_sum_init = tf.random_normal(
     shape=(1, caps1_n_caps, caps2_n_caps, 1, 1),
     stddev=init_sigma, dtype=tf.float32, name="W_init_sum")
@@ -115,7 +120,7 @@ w_sums = tf.Variable(W_sum_init, name="W_sum")
 
 batch_size = tf.shape(X)[0]
 W_tiled = tf.tile(W, [batch_size, 1, 1, 1, 1], name="W_tiled")
-
+W_tiled_r = tf.tile(W_r, [batch_size, 1, 1, 1, 1], name="W_tiled_r")
 
 
 caps1_output_expanded = tf.expand_dims(caps1_output, -1,
@@ -168,9 +173,9 @@ fc_output2 = tf.layers.dense(fc_input_2, n_hidden2,
                               name="hidden2")
 
 
-caps2_output_round_1 = tf.add(caps2_output_round_1_init, tf.reshape(fc_output2,
+caps2_output_round_1 = squash(tf.add(caps2_output_round_1_init, tf.reshape(fc_output2,
                            [-1, 1,4, 151,1],
-                           name="fc_input2"))
+                           name="fc_input2")),axis=-2)
 
 ##################################################################
 
@@ -178,8 +183,20 @@ caps2_output_round_1_tiled = tf.tile(
     caps2_output_round_1, [1, caps1_n_caps, 1, 1, 1],
     name="caps2_output_round_1_tiled")
 
+caps1_output_tile_modified = tf.matmul(W_tiled_r, caps2_output_round_1_tiled,
+                            name="caps2_predicted")
 
-agreement = tf.matmul(caps2_predicted, caps2_output_round_1_tiled,
+
+caps2_predicted_modified_recude_dim = tf.reduce_sum(caps1_output_tile_modified, axis=2, keep_dims=True)
+                             
+
+caps2_predicted_added = tf.add(caps2_predicted_modified_recude_dim , caps1_output_tile)
+
+caps1_output_tiled_modified = tf.tile(caps2_predicted_added, [1, 1, caps2_n_caps, 1, 1])
+
+caps2_predicted_modified = tf.matmul(W_tiled, caps1_output_tiled_modified)
+
+agreement = tf.matmul(caps2_predicted_modified, caps2_output_round_1_tiled,
                       transpose_a=True, name="agreement")
 
 
@@ -190,7 +207,7 @@ routing_weights_round_2 = tf.nn.softmax(raw_weights_round_2,
                                         dim=2,
                                         name="routing_weights_round_2")
 weighted_predictions_round_2 = tf.multiply(routing_weights_round_2,
-                                           caps2_predicted,
+                                           caps2_predicted_modified,
                                            name="weighted_predictions_round_2")
 weighted_sum_round_2 = tf.reduce_sum(weighted_predictions_round_2,
                                      axis=1, keep_dims=True,
@@ -214,9 +231,9 @@ fc_output3 = tf.layers.dense(fc_input_3, n_hidden3,
                               name="hidden3")
 
 
-caps2_output_round_2 = tf.add(caps2_output_round_2_init, tf.reshape(fc_output3,
+caps2_output_round_2 = squash(tf.add(caps2_output_round_2_init, tf.reshape(fc_output3,
                            [-1, 1,4, 151,1],
-                           name="fc_input3"))
+                           name="fc_input3")),axis=-2)
 
 
 
