@@ -46,7 +46,7 @@ class BatchDatset:
 
         self.annotations = np.zeros((self.pre_annotations.shape[0],4,151,1))
         for i in range(self.pre_annotations.shape[0]):
-            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:][:56,:56,:])
+            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:])
             
 
             top_left = np.copy(cropped_annotation[:28,:28,:])
@@ -79,7 +79,7 @@ class BatchDatset:
                 self.annotations[i,3,unique[j],0] = 1
 
         
-        self.images = self.pre_images[:,:56,:56,:]
+        self.images = self.pre_images
         print ("####################")
         print (self.annotations.shape)
         print (self.images.shape)
