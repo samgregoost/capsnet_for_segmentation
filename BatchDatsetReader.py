@@ -120,12 +120,13 @@ class BatchDatset:
             np.random.shuffle(perm)
             self.images = self.images[perm]
             self.annotations = self.annotations[perm]
+            self.pre_annotations = self.pre_annotations[perm]
             # Start next epoch
             start = 0
             self.batch_offset = batch_size
 
         end = self.batch_offset
-        return self.images[start:end], self.annotations[start:end]
+        return self.images[start:end], self.annotations[start:end],self.pre_annotations[start:end]
 
     def get_random_batch(self, batch_size):
         indexes = np.random.randint(0, self.images.shape[0], size=[batch_size]).tolist()

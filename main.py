@@ -19,7 +19,7 @@ tf.flags.DEFINE_string('mode', "train", "Mode train/ test/ visualize")
 
 MAX_ITERATION = int(1e7 + 1)
 NUM_OF_CLASSESS = 151
-IMAGE_SIZE = 112
+IMAGE_SIZE = 56
 PROCESSED_IMAGE_SIZE = 56
 
 tf.reset_default_graph()
@@ -64,17 +64,14 @@ n_hidden1 = 512
 n_output = caps1_n_caps * caps1_n_dims
 
 hidden1 = tf.layers.dense(fc_input, n_hidden1,
-                              activation=tf.nn.relu,
-                              name="hidden1")
+                              activation=tf.nn.relu)
 
 
 fc_output = tf.layers.dense(hidden1, caps1_n_caps * caps1_n_dims,
-                                     activation=tf.nn.relu,
-                                     name="decoder_output")
+                                     activation=tf.nn.relu)
 
 caps1_input = tf.reshape(fc_output,
-                           [-1, 20, 20,256],
-                           name="fc_input")
+                           [-1, 20, 20,256])
 
 print(caps1_input)
 
@@ -231,9 +228,9 @@ fc_output3 = tf.layers.dense(fc_input_3, n_hidden3,
                               name="hidden3")
 
 
-caps2_output_round_2 = squash(tf.add(caps2_output_round_2_init, tf.reshape(fc_output3,
+caps2_output_round_2 = tf.add(caps2_output_round_2_init, tf.reshape(fc_output3,
                            [-1, 1,4, 151,1],
-                           name="fc_input3")),axis=-2)
+                           name="fc_input3"))
 
 
 
@@ -242,6 +239,38 @@ caps2_output_round_2 = squash(tf.add(caps2_output_round_2_init, tf.reshape(fc_ou
 
 
 caps2_output = caps2_output_round_2
+
+
+decoder_input = tf.reshape(caps2_output,
+                           [-1, caps2_n_caps * caps2_n_dims],
+                           name="decoder_input")
+
+
+n_hidden1_decoder = 512
+n_hidden2_decoder = 1024
+n_output_decoder = 56 * 56
+
+
+with tf.name_scope("decoder"):
+    hidden1_de = tf.layers.dense(decoder_input, n_hidden1_decoder,
+                              activation=tf.nn.relu)
+    hidden2_de = tf.layers.dense(hidden1_de, n_hidden2_decoder,
+                              activation=tf.nn.relu)
+    decoder_output_init = tf.layers.dense(hidden2_de, n_output_decoder,
+                                     activation=tf.nn.relu)
+
+
+decoder_output = tf.round(decoder_output_init)
+decoder_annotation = tf.placeholder(tf.float32, shape=[None, 56, 56, 1], name="decoder_annotation")
+annot_flat = tf.reshape(decoder_annotation, [-1, n_output_decoder], name="X_flat")
+squared_difference = tf.square(annot_flat - decoder_output,
+                               name="squared_difference")
+
+decoder_loss = tf.reduce_mean(squared_difference,
+                                    name="reconstruction_loss")
+
+
+
 
 
 y_pred = tf.cast(tf.squeeze(tf.to_int32(caps2_output > 0.5),axis=[1,4]),tf.float32)
@@ -269,7 +298,11 @@ absent_error = tf.reshape(absent_error_raw, shape=(-1,4, 151), name="absent_erro
 
 L = tf.add(tf.multiply(shaped_annotations,present_error), lambda_ * tf.multiply((1.0 - shaped_annotations), absent_error),name="L")
 
-loss = tf.reduce_mean(tf.reduce_sum(L, axis=1), name="margin_loss")
+margin_loss = tf.reduce_mean(tf.reduce_sum(L, axis=1), name="margin_loss")
+
+alpha = 0.5
+
+loss = tf.add(margin_loss, alpha * decoder_loss)
 # loss = tf.reduce_mean((tf.nn.softmax_cross_entropy_with_logits(logits=shaped_caps2_output,
 #                                                                       labels=shaped_annotations,
 #                                                                       name="entropy")))
@@ -350,8 +383,8 @@ for itr in xrange(MAX_ITERATION):
 
 
 
-	X_batch, y_batch = train_dataset_reader.next_batch(FLAGS.batch_size)
-	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
+	X_batch, y_batch, y_annotation = train_dataset_reader.next_batch(FLAGS.batch_size)
+	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
 	
 	if (itr % 10) == 0:
 	# 	print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
@@ -365,12 +398,14 @@ for itr in xrange(MAX_ITERATION):
 		acc_vals = []
 		recall_vals = []
 		precision_vals = []
+		decoder_vals = []
 		for val_itr in range(1,1000):
-			X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
-			loss_val, acc_val, recall_val, precision_val = sess.run([loss,accuracy, recall, precision], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
+			X_batch, y_batch, y_annotation = validation_dataset_reader.next_batch(FLAGS.batch_size)
+			loss_val, acc_val, recall_val, precision_val, decoder_val = sess.run([loss,accuracy, recall, precision, decoder_loss], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
 			loss_vals.append(loss_val)
 			acc_vals.append(acc_val)
 			recall_vals.append(recall_val)
+			decoder_vals.append(decoder_val)
 			precision_vals.append(precision_val)
 			print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
 					val_itr, 1000,
@@ -381,10 +416,11 @@ for itr in xrange(MAX_ITERATION):
 		acc_val = np.mean(acc_vals)
 		recall_val = np.mean(recall_vals)
 		precision_val = np.mean(precision_vals)
+		decoder_val = np.mean(decoder_vals)
 		epoch = epoch + 1
-		print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f}".format(
+		print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f} Decoder_loss: {:.6f}".format(
 				epoch, acc_val * 100, loss_val,
-				" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val))
+				" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val, decoder_val))
 		if loss_val < best_loss_val:
 			save_path = saver.save(sess, checkpoint_path)
 			best_loss_val = loss_val
