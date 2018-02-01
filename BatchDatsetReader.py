@@ -44,42 +44,21 @@ class BatchDatset:
 
     def format_annotations(self):
 
-        self.annotations = np.zeros((self.pre_annotations.shape[0],4,151,1))
+        self.annotations = np.zeros((self.pre_annotations.shape[0],151,1,1))
         for i in range(self.pre_annotations.shape[0]):
-            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:][:56,:56,:])
+            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:])
             
 
-            top_left = np.copy(cropped_annotation[:28,:28,:])
-            top_right = np.copy(cropped_annotation[28:,:28,:])
-            bottom_right = np.copy(cropped_annotation[28:,28:,:])
-            bottom_left = np.copy(cropped_annotation[:28,28:,:])
+        
 
-            unique, counts = np.unique(top_left, return_counts=True)
+            unique, counts = np.unique(cropped_annotation, return_counts=True)
 
             for j in range(unique.shape[0]):
                 #self.annotations[i,0,unique[j],0] = self.annotations[i,0,unique[j],0] + counts[j]
-                self.annotations[i,0,unique[j],0] = 1
-
-            unique, counts = np.unique(top_right, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,1,unique[j],0] = self.annotations[i,1,unique[j],0] + counts[j]
-                self.annotations[i,1,unique[j],0] = 1
-
-            unique, counts = np.unique(bottom_right, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,2,unique[j],0] = self.annotations[i,3,unique[j],0] + counts[j]
-                self.annotations[i,2,unique[j],0] = 1
-
-            unique, counts = np.unique(bottom_left, return_counts=True)
-
-            for j in range(unique.shape[0]):
-                #self.annotations[i,3,unique[j],0] = self.annotations[i,1,unique[j],0] + counts[j]
-                self.annotations[i,3,unique[j],0] = 1
+                self.annotations[i,unique[j],0,0] = 1
 
         
-        self.images = self.pre_images[:,:56,:56,:]
+        self.images = self.pre_images
         print ("####################")
         print (self.annotations.shape)
         print (self.images.shape)
