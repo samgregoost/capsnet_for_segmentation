@@ -270,12 +270,66 @@ decoder_loss = tf.reduce_mean(squared_difference,
                                   name="cn_reconstruction_loss")
 
 
+def dimesion_reduction_output(input, name = None):
+    with tf.name_scope(name, default_name="cn"):
+        
+        dim_reduct_output_np = np.zeros((1,1,151))
+
+        for k in range(151):
+            dim_reduct_output_np[0,0,k] = k
+
+        dim_reduct_output = tf.constant(dim_reduct_output_np, dtype = tf.float32)
+
+        dim_reduct_output_tiled = tf.tile(dim_reduct_output, [tf.shape(input)[0], 1, 1],)
+
+        F = tf.transpose(tf.matmul(input, dim_reduct_output_tiled, transpose_b=True),[0, 2, 1])
+
+        return F
+
+
+
+
+def loss_term_one(Fp, name = None):
+    with tf.name_scope(name, default_name="cn"):
+        x_ = tf.expand_dims(Fp, 1)
+        y_ = tf.expand_dims(Fp, 3)
+        sub = tf.subtract(x_, y_)
+        squared = tf.square(sub)
+        #sum = tf.expand_dims(tf.reduce_sum(,[1,2,3]),1)
+
+        return squared
+
+
+print(caps2_output)
+Fp = dimesion_reduction_output(tf.squeeze(caps2_output,axis=[1,4]), name = "cn_caps2_output_reducedim")
+########################################################new loss function
 
 
 
 y_pred = tf.cast(tf.squeeze(tf.to_int32(caps2_output > 0.5),axis=[1,4]),tf.float32, name = "cn_y_pred")
 
 print(y_pred)
+
+
+
+
+
+
+# annotation = tf.placeholder(tf.float32, shape=[None, 4, 151, 1], name="cn_annotation")
+# shaped_annotations = tf.squeeze(annotation, squeeze_dims=[3], name="cn_shaped_annotations")
+
+W_similarity = tf.random_normal(
+  shape=(1, caps2_n_caps, caps2_n_caps),
+  stddev=init_sigma, dtype=tf.float32, name="cn_W_similarity")
+W_sim = tf.Variable(W_similarity, name="cn_W_sim")
+
+#loss_first_term_mul = tf.multiply(loss_term_one(Fp),W_sim, name = "cn_loss_first_term_mul")
+loss_first_term = tf.reduce_sum(loss_term_one(Fp), name = "cn_loss_first_term")
+
+print(loss_first_term)
+
+
+
 
 
 m_plus = 0.9
@@ -287,6 +341,10 @@ lambda_ = 0.5
 annotation = tf.placeholder(tf.float32, shape=[None, 4, 151, 1], name="cn_annotation")
 shaped_annotations = tf.squeeze(annotation, squeeze_dims=[3], name="cn_shaped_annotations")
 #shaped_caps2_output = tf.nn.softmax(tf.squeeze(caps2_output, squeeze_dims=[1,4]),dim = 2)
+Fy = dimesion_reduction_output(shaped_annotations, name = "cn_annotation_reducedim")
+loss_second_term_sub = tf.square(tf.subtract(Fp, Fy, name = "cn_loss_second_term_sub"))
+loss_second_term = tf.reduce_sum(loss_second_term_sub, name = "cn_loss_second_term")
+print(loss_second_term)
 
 present_error_raw = tf.square(tf.maximum(0., m_plus - caps2_output), name="cn_present_error_raw")
 present_error = tf.reshape(present_error_raw, shape=(-1, 4, 151), name="cn_present_error")
@@ -302,9 +360,11 @@ margin_loss = tf.reduce_mean(tf.reduce_sum(L, axis=1), name="cn_margin_loss")
 
 alpha = 0.05
 
-loss = tf.add(margin_loss, alpha * decoder_loss, name = "cn_loss")
+loss_old = tf.add(margin_loss, alpha * decoder_loss, name = "cn_loss")
 
+loss_new = tf.add(0.005*loss_first_term, loss_second_term)
 
+loss = tf.add(loss_old, 0.005* loss_new)
 
 best_loss_val = np.infty
 correct = tf.equal(shaped_annotations, y_pred, name="cn_correct")
@@ -346,74 +406,74 @@ sess.run(tf.local_variables_initializer())
 #saver.restore(sess, checkpoint_path)
 epoch = 0
 for itr in xrange(MAX_ITERATION):
-	loss_vals = []
-	acc_vals = []
-	recall_vals = []
-	precision_vals = []
+    loss_vals = []
+    acc_vals = []
+    recall_vals = []
+    precision_vals = []
 # for val_itr in range(1,1000):
-# 	X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
-# 	loss_val, acc_val, recall_val, precision_val = sess.run([loss,accuracy, recall, precision], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
-# 	loss_vals.append(loss_val)
-# 	acc_vals.append(acc_val)
-# 	recall_vals.append(recall_val)
-# 	precision_vals.append(precision_val)
-# 	print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
-# 			val_itr, 1000,
-# 			val_itr * 100 / 1000),
-# 			end=" " * 10)
-	
+#   X_batch, y_batch = validation_dataset_reader.next_batch(FLAGS.batch_size)
+#   loss_val, acc_val, recall_val, precision_val = sess.run([loss,accuracy, recall, precision], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch})
+#   loss_vals.append(loss_val)
+#   acc_vals.append(acc_val)
+#   recall_vals.append(recall_val)
+#   precision_vals.append(precision_val)
+#   print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
+#           val_itr, 1000,
+#           val_itr * 100 / 1000),
+#           end=" " * 10)
+    
 # loss_val = np.mean(loss_vals)
 # acc_val = np.mean(acc_vals)
 # recall_val = np.mean(recall_vals)
 # precision_val = np.mean(precision_vals)
 
 # print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f}".format(
-# 		epoch, acc_val * 100, loss_val,
-# 		" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val))
+#       epoch, acc_val * 100, loss_val,
+#       " (improved)" if loss_val < best_loss_val else "", recall_val, precision_val))
 
 
 
 
 
-	X_batch, y_batch, y_annotation = train_dataset_reader.next_batch(FLAGS.batch_size)
-	_,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
-
-	if (itr % 10) == 0:
-	# 	print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
-		print("\rIteration: {}/{} ({:.1f}%)  Loss: {:.5f}".format(
-	                    itr, 10000,
-	                    itr * 100 / 10000,
-	                    loss_train),
-	                end="")
-	if (itr % 10000) == 0:
-		loss_vals = []
-		acc_vals = []
-		recall_vals = []
-		precision_vals = []
-		decoder_vals = []
-		for val_itr in range(1,1000):
-			X_batch, y_batch, y_annotation = validation_dataset_reader.next_batch(FLAGS.batch_size)
-			loss_val, acc_val, recall_val, precision_val, decoder_val = sess.run([loss,accuracy, recall, precision, decoder_loss], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
-			loss_vals.append(loss_val)
-			acc_vals.append(acc_val)
-			recall_vals.append(recall_val)
-			decoder_vals.append(decoder_val)
-			precision_vals.append(precision_val)
-			print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
-					val_itr, 1000,
-					val_itr * 100 / 1000),
-					end=" " * 10)
-			
-		loss_val = np.mean(loss_vals)
-		acc_val = np.mean(acc_vals)
-		recall_val = np.mean(recall_vals)
-		precision_val = np.mean(precision_vals)
-		decoder_val = np.mean(decoder_vals)
-		epoch = epoch + 1
-		print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f} Decoder_loss: {:.6f}".format(
-				epoch, acc_val * 100, loss_val,
-				" (improved)" if loss_val < best_loss_val else "", recall_val, precision_val, decoder_val))
-		if loss_val < best_loss_val:
-			save_path = saver.save(sess, checkpoint_path)
-			best_loss_val = loss_val
-		#save_path = saver.save(sess, checkpoint_path)
+    X_batch, y_batch, y_annotation = train_dataset_reader.next_batch(FLAGS.batch_size)
+    _,loss_train = sess.run([training_op, loss],feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
+   
+    if (itr % 10) == 0:
+    #   print("\rIteration: {} ({:.1f}%)  Loss: {:.5f}".format(itr,itr * 100 / MAX_ITERATION,loss_train),end="")
+        print("\rIteration: {}/{} ({:.1f}%)  Loss: {:.5f}".format(
+                        itr, 10000,
+                        itr * 100 / 10000,
+                        loss_train),
+                    end="")
+    if (itr % 10000) == 0:
+        loss_vals = []
+        acc_vals = []
+        recall_vals = []
+        precision_vals = []
+        decoder_vals = []
+        for val_itr in range(1,1000):
+            X_batch, y_batch, y_annotation = validation_dataset_reader.next_batch(FLAGS.batch_size)
+            loss_val, acc_val, recall_val, precision_val, decoder_val = sess.run([loss,accuracy, recall, precision, decoder_loss], feed_dict={X: X_batch.reshape([-1, PROCESSED_IMAGE_SIZE, PROCESSED_IMAGE_SIZE, 3]),annotation: y_batch, decoder_annotation:y_annotation})
+            loss_vals.append(loss_val)
+            acc_vals.append(acc_val)
+            recall_vals.append(recall_val)
+            decoder_vals.append(decoder_val)
+            precision_vals.append(precision_val)
+            print("\rEvaluating the model: {}/{} ({:.1f}%)".format(
+                    val_itr, 1000,
+                    val_itr * 100 / 1000),
+                    end=" " * 10)
+            
+        loss_val = np.mean(loss_vals)
+        acc_val = np.mean(acc_vals)
+        recall_val = np.mean(recall_vals)
+        precision_val = np.mean(precision_vals)
+        decoder_val = np.mean(decoder_vals)
+        epoch = epoch + 1
+        print("\rEpoch: {}  Val accuracy: {:.4f}%  Loss: {:.6f}{} Recall: {:.6f}   Precision: {:.6f} Decoder_loss: {:.6f}".format(
+                epoch, acc_val * 100, loss_val,
+                " (improved)" if loss_val < best_loss_val else "", recall_val, precision_val, decoder_val))
+        if loss_val < best_loss_val:
+            save_path = saver.save(sess, checkpoint_path)
+            best_loss_val = loss_val
+        #save_path = saver.save(sess, checkpoint_path)

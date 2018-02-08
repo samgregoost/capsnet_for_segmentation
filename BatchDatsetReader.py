@@ -5,7 +5,7 @@ import numpy as np
 import scipy.misc as misc
 import cv2
 import PIL
-
+import tensorflow as tf
 
 class BatchDatset:
     files = []
@@ -46,7 +46,7 @@ class BatchDatset:
 
         self.annotations = np.zeros((self.pre_annotations.shape[0],4,151,1))
         for i in range(self.pre_annotations.shape[0]):
-            cropped_annotation = np.copy(tf.image.resize_images(self.pre_annotations, [-1,56,56,1])[i,:,:,:])
+            cropped_annotation = np.copy(self.pre_annotations[i,:,:,:])
             
 
             top_left = np.copy(cropped_annotation[:28,:28,:])
